@@ -1,15 +1,16 @@
 package main
 
 import (
-	"net/http"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"encoding/json"
+	"net/http"
 	"time"
-	"github.com/rs/cors"
-	domain "github.com/maxabcr2000/LoginServerGo/pkg/domain"
-	mw "github.com/uniontsai/httpmiddlewarego"
+
 	jwt "github.com/dgrijalva/jwt-go"
+	domain "github.com/maxabcr2000/LoginServerGo/pkg/domain"
+	"github.com/rs/cors"
+	mw "github.com/uniontsai/httpmiddlewarego"
 )
 
 type ServerDependency func(*LoginServer) error
@@ -19,12 +20,12 @@ type Repository interface {
 	ReadUser(key string) (*domain.User, error)
 }
 
-type LoginServer struct{
+type LoginServer struct {
 	signKey interface{}
-	repo Repository
+	repo    Repository
 }
 
-func (server *LoginServer) handleLogin(w http.ResponseWriter, req *http.Request){
+func (s *LoginServer) handleLogin(w http.ResponseWriter, req *http.Request) {
 	fmt.Println("listJSON Endpoint: ", req.RemoteAddr)
 
 	if req.Header.Get("Content-Type") != "application/json" {
@@ -41,50 +42,50 @@ func (server *LoginServer) handleLogin(w http.ResponseWriter, req *http.Request)
 	defer req.Body.Close()
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-		return 
+		return
 	}
 
-	type LoginUserRequest struct{
-		Account string `json:"account"`
+	type LoginUserRequest struct {
+		Account  string `json:"account"`
 		Password string `json:"password"`
 	}
 
-	userRequest:= &LoginUserRequest{}
+	userRequest := &LoginUserRequest{}
 	err = json.Unmarshal(body, userRequest)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return 
+		return
 	}
 
-	savedUser,err := server.repo.ReadUser(userRequest.Account)
+	savedUser, err := s.repo.ReadUser(userRequest.Account)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return 
+		return
 	}
 
-	if userRequest.Password!=savedUser.Password{
+	if userRequest.Password != savedUser.Password {
 		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.StandardClaims{
-		Subject: userRequest.Account,
+		Subject:   userRequest.Account,
 		NotBefore: time.Now().Unix(),
-		ExpiresAt: time.Now().Add(1* time.Hour).Unix(),
+		ExpiresAt: time.Now().Add(1 * time.Hour).Unix(),
 	})
-	
-	fmt.Println("signKey:", server.signKey)
 
-	tokenString, err := token.SignedString(server.signKey)
+	fmt.Println("signKey:", s.signKey)
+
+	tokenString, err := token.SignedString(s.signKey)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return 
+		return
 	}
 
 	fmt.Fprint(w, tokenString)
 }
 
-func (server *LoginServer) handleCreateUser(w http.ResponseWriter, req *http.Request){
+func (s *LoginServer) handleCreateUser(w http.ResponseWriter, req *http.Request) {
 	fmt.Println("listJSON Endpoint: ", req.RemoteAddr)
 
 	if req.Header.Get("Content-Type") != "application/json" {
@@ -101,49 +102,49 @@ func (server *LoginServer) handleCreateUser(w http.ResponseWriter, req *http.Req
 	defer req.Body.Close()
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-		return 
+		return
 	}
 
-	type CreateUserRequest struct{
-		Account string `json:"account"`
+	type CreateUserRequest struct {
+		Account  string `json:"account"`
 		Password string `json:"password"`
-		Name string `json:"name"`
-		Email string `json:"email"`
+		Name     string `json:"name"`
+		Email    string `json:"email"`
 	}
 
-	userRequest:= &CreateUserRequest{}
+	userRequest := &CreateUserRequest{}
 	err = json.Unmarshal(body, userRequest)
-	if err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return 
-	}
-
-	user:= &domain.User{
-		Account: userRequest.Account,
-		Password: userRequest.Password,
-		Name: userRequest.Name,
-		Email: userRequest.Email,
-	}
-
-	err = server.repo.SaveUser(user, user.Account)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
-	fmt.Fprint(w,"User creation has completed.")
+	user := &domain.User{
+		Account:  userRequest.Account,
+		Password: userRequest.Password,
+		Name:     userRequest.Name,
+		Email:    userRequest.Email,
+	}
+
+	err = s.repo.SaveUser(user, user.Account)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Fprint(w, "User creation has completed.")
 }
 
-func WithRepository(repo Repository) ServerDependency{
-	return func(server *LoginServer) error{
+func WithRepository(repo Repository) ServerDependency {
+	return func(server *LoginServer) error {
 		server.repo = repo
 		return nil
 	}
 }
 
-func WithSignKey(signKey string) ServerDependency{
-	return func(server *LoginServer) error{
-		privateKey, err:=jwt.ParseRSAPrivateKeyFromPEM([]byte(signKey))
+func WithSignKey(signKey string) ServerDependency {
+	return func(server *LoginServer) error {
+		privateKey, err := jwt.ParseRSAPrivateKeyFromPEM([]byte(signKey))
 		if err != nil {
 			panic(err)
 		}
@@ -153,23 +154,23 @@ func WithSignKey(signKey string) ServerDependency{
 	}
 }
 
-func NewLoginServer(deps ...ServerDependency) (*LoginServer, error){
-	server:=&LoginServer{}
-	for _,dep := range deps{
+func NewLoginServer(deps ...ServerDependency) (*LoginServer, error) {
+	server := &LoginServer{}
+	for _, dep := range deps {
 		dep(server)
 	}
 
-	return server,nil
+	return server, nil
 }
 
-func (server *LoginServer) Start(){
+func (s *LoginServer) Start() {
 	access := cors.AllowAll().Handler
 	mux := http.NewServeMux()
-	mux.HandleFunc("/login", mw.PostOnly(server.handleLogin))
-	mux.HandleFunc("/createUser", mw.PostOnly(server.handleCreateUser))
+	mux.HandleFunc("/login", mw.PostOnly(s.handleLogin))
+	mux.HandleFunc("/createUser", mw.PostOnly(s.handleCreateUser))
 
-	err:=http.ListenAndServe(":8889", access(mux))
-	if err!=nil{
+	err := http.ListenAndServe(":8889", access(mux))
+	if err != nil {
 		fmt.Println("ListenAndServe Error: ", err)
 	}
 }
