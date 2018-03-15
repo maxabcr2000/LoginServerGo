@@ -32,6 +32,7 @@ type LoginServer struct{
 type User struct {
     Account string `json:"account"`
 	Password string `json:"password"`
+	Name string `json:"name"`
 	Email string `json:"email"`
 }
 
@@ -81,7 +82,9 @@ func (server *LoginServer) handleLogin(w http.ResponseWriter, req *http.Request)
 		ExpiresAt: time.Now().Add(1* time.Hour).Unix(),
 	})
 	
-	privateKey, err:=jwt.ParseECPrivateKeyFromPEM([]byte(server.signKey))
+	fmt.Println("signKey:", server.signKey)
+
+	privateKey, err:=jwt.ParseRSAPrivateKeyFromPEM([]byte(server.signKey))
 	if err != nil {
 		panic(err)
 	}
@@ -126,12 +129,21 @@ func (server *LoginServer) handleCreateUser(w http.ResponseWriter, req *http.Req
 	if err != nil {
 		panic(err)
 	}
+	
+	existedUser, err := server.repo.ReadMessage(BOLT_BUCKET_NAME_USERS, user.Account)
+	if existedUser !=""{
+		http.Error(w, fmt.Sprintf("User Account: %s is already used!", user.Account), http.StatusInternalServerError)
+		return
+	}
 
 	err = server.repo.SaveMessage(BOLT_BUCKET_NAME_USERS, user.Account, string(body))
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
+
+	fmt.Fprint(w,"User creation has completed.")
 }
 
 func WithRepository(repo Repository) ServerDependency{
