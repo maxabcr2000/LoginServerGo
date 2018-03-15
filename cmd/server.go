@@ -101,13 +101,15 @@ func (server *LoginServer) handleCreateUser(w http.ResponseWriter, req *http.Req
 	body, err := ioutil.ReadAll(req.Body)
 	defer req.Body.Close()
 	if err != nil {
-		panic(err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return 
 	}
 
 	user:= &domain.User{}
 	err = json.Unmarshal(body, user)
 	if err != nil {
-		panic(err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return 
 	}
 
 	err = server.repo.SaveUser(user, user.Account)
