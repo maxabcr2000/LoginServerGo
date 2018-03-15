@@ -44,32 +44,31 @@ func (server *LoginServer) handleLogin(w http.ResponseWriter, req *http.Request)
 		return 
 	}
 
-	type CreateUserRequest struct{
-		Account string
-		Password string
-		Email string
+	type LoginUserRequest struct{
+		Account string `json:"account"`
+		Password string `json:"password"`
 	}
 
-	user:= &domain.User{}
-	err = json.Unmarshal(body, user)
+	userRequest:= &LoginUserRequest{}
+	err = json.Unmarshal(body, userRequest)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return 
 	}
 
-	savedUser,err := server.repo.ReadUser(user.Account)
+	savedUser,err := server.repo.ReadUser(userRequest.Account)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return 
 	}
 
-	if user.Password!=savedUser.Password{
+	if userRequest.Password!=savedUser.Password{
 		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.StandardClaims{
-		Subject: user.Account,
+		Subject: userRequest.Account,
 		NotBefore: time.Now().Unix(),
 		ExpiresAt: time.Now().Add(1* time.Hour).Unix(),
 	})
@@ -105,11 +104,25 @@ func (server *LoginServer) handleCreateUser(w http.ResponseWriter, req *http.Req
 		return 
 	}
 
-	user:= &domain.User{}
-	err = json.Unmarshal(body, user)
+	type CreateUserRequest struct{
+		Account string `json:"account"`
+		Password string `json:"password"`
+		Name string `json:"name"`
+		Email string `json:"email"`
+	}
+
+	userRequest:= &CreateUserRequest{}
+	err = json.Unmarshal(body, userRequest)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return 
+	}
+
+	user:= &domain.User{
+		Account: userRequest.Account,
+		Password: userRequest.Password,
+		Name: userRequest.Name,
+		Email: userRequest.Email,
 	}
 
 	err = server.repo.SaveUser(user, user.Account)
