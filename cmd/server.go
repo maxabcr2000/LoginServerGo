@@ -1,4 +1,4 @@
-package server
+package main
 
 import (
 	"net/http"
@@ -7,45 +7,28 @@ import (
 	"encoding/json"
 	"time"
 	"github.com/rs/cors"
-	authentication "github.com/uniontsai/httpmiddlewarego"
+	domain "github.com/maxabcr2000/LoginServerGo/pkg/domain"
+	mw "github.com/uniontsai/httpmiddlewarego"
 	jwt "github.com/dgrijalva/jwt-go"
-)
-
-const(
-	BOLT_BUCKET_NAME_USERS = "Users"
-	PARM_USER_ACC = "account"
-	PARM_USER_PASS= "password"
 )
 
 type ServerDependency func(*LoginServer) error
 
 type Repository interface {
-	SaveMessage(bucketName, key, value string) error
-	ReadMessage(bucketName, key string) (string, error)
+	SaveUser(user *domain.User, key string) error
+	ReadUser(key string) (*domain.User, error)
 }
 
 type LoginServer struct{
-	signKey string
+	signKey interface{}
 	repo Repository
-}
-
-type User struct {
-    Account string `json:"account"`
-	Password string `json:"password"`
-	Name string `json:"name"`
-	Email string `json:"email"`
 }
 
 func (server *LoginServer) handleLogin(w http.ResponseWriter, req *http.Request){
 	fmt.Println("listJSON Endpoint: ", req.RemoteAddr)
 
-	if req.Method != "POST" {
-		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
-		return
-	}
-
 	if req.Header.Get("Content-Type") != "application/json" {
-		http.Error(w, "We only support application/json format in POST.", http.StatusUnsupportedMediaType)
+		http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
 		return
 	}
 
@@ -55,25 +38,34 @@ func (server *LoginServer) handleLogin(w http.ResponseWriter, req *http.Request)
 	}
 
 	body, err := ioutil.ReadAll(req.Body)
+	defer req.Body.Close()
 	if err != nil {
-		panic(err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return 
 	}
 
-	user:= &User{}
+	type CreateUserRequest struct{
+		Account string
+		Password string
+		Email string
+	}
+
+	user:= &domain.User{}
 	err = json.Unmarshal(body, user)
 	if err != nil {
-		panic(err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return 
 	}
 
-	savedUser:= &User{}
-	savedData,err := server.repo.ReadMessage(BOLT_BUCKET_NAME_USERS, user.Account)
-	err = json.Unmarshal([]byte(savedData), savedUser)
+	savedUser,err := server.repo.ReadUser(user.Account)
 	if err != nil {
-		panic(err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return 
 	}
 
 	if user.Password!=savedUser.Password{
-		http.Error(w, "Wrong account / password.", http.StatusUnauthorized)
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.StandardClaims{
@@ -84,33 +76,20 @@ func (server *LoginServer) handleLogin(w http.ResponseWriter, req *http.Request)
 	
 	fmt.Println("signKey:", server.signKey)
 
-	privateKey, err:=jwt.ParseRSAPrivateKeyFromPEM([]byte(server.signKey))
+	tokenString, err := token.SignedString(server.signKey)
 	if err != nil {
-		panic(err)
-	}
-
-	tokenString, err := token.SignedString(privateKey)
-	if err != nil {
-		panic(err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return 
 	}
 
 	fmt.Fprint(w, tokenString)
-
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
 }
 
 func (server *LoginServer) handleCreateUser(w http.ResponseWriter, req *http.Request){
 	fmt.Println("listJSON Endpoint: ", req.RemoteAddr)
 
-	if req.Method != "POST" {
-		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
-		return
-	}
-
 	if req.Header.Get("Content-Type") != "application/json" {
-		http.Error(w, "We only support application/json format in POST.", http.StatusUnsupportedMediaType)
+		http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
 		return
 	}
 
@@ -120,26 +99,20 @@ func (server *LoginServer) handleCreateUser(w http.ResponseWriter, req *http.Req
 	}
 
 	body, err := ioutil.ReadAll(req.Body)
+	defer req.Body.Close()
 	if err != nil {
 		panic(err)
 	}
 
-	user:= &User{}
+	user:= &domain.User{}
 	err = json.Unmarshal(body, user)
 	if err != nil {
 		panic(err)
 	}
-	
-	existedUser, err := server.repo.ReadMessage(BOLT_BUCKET_NAME_USERS, user.Account)
-	if existedUser !=""{
-		http.Error(w, fmt.Sprintf("User Account: %s is already used!", user.Account), http.StatusInternalServerError)
-		return
-	}
 
-	err = server.repo.SaveMessage(BOLT_BUCKET_NAME_USERS, user.Account, string(body))
-
+	err = server.repo.SaveUser(user, user.Account)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
@@ -155,7 +128,12 @@ func WithRepository(repo Repository) ServerDependency{
 
 func WithSignKey(signKey string) ServerDependency{
 	return func(server *LoginServer) error{
-		server.signKey = signKey
+		privateKey, err:=jwt.ParseRSAPrivateKeyFromPEM([]byte(signKey))
+		if err != nil {
+			panic(err)
+		}
+
+		server.signKey = privateKey
 		return nil
 	}
 }
@@ -172,8 +150,8 @@ func NewLoginServer(deps ...ServerDependency) (*LoginServer, error){
 func (server *LoginServer) Start(){
 	access := cors.AllowAll().Handler
 	mux := http.NewServeMux()
-	mux.HandleFunc("/login", authentication.PostOnly(server.handleLogin))
-	mux.HandleFunc("/createUser", authentication.PostOnly(server.handleCreateUser))
+	mux.HandleFunc("/login", mw.PostOnly(server.handleLogin))
+	mux.HandleFunc("/createUser", mw.PostOnly(server.handleCreateUser))
 
 	err:=http.ListenAndServe(":8889", access(mux))
 	if err!=nil{
